@@ -26,16 +26,16 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 CONFIG += c++11
 
-CONFIG(debug, debug|release) {
-    DESTDIR  = $${OUT_PWD}/debug
-    CONFIG  += DebugBuild
-    CONFIG      += VideoEnabled
-} else {
-    DESTDIR  = $${OUT_PWD}/release
-    CONFIG  += ReleaseBuild
-    win32: QMAKE_CXXFLAGS += /bigobj
-    CONFIG      += VideoEnabled
-}
+#CONFIG(debug, debug|release) {
+#    DESTDIR  = $${OUT_PWD}/debug
+#    CONFIG  += DebugBuild
+#    CONFIG      += VideoEnabled
+#} else {
+#    DESTDIR  = $${OUT_PWD}/release
+#    CONFIG  += ReleaseBuild
+#    win32: QMAKE_CXXFLAGS += /bigobj
+#    CONFIG      += VideoEnabled
+#}
 
 GST_ROOT = D:\gstreamer\1.0\x86_64
 #DEFINES += QT_DEPRECATED_WARNINGS
