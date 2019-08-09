@@ -20,19 +20,27 @@ public:
     ~gstplayer();
     void start();
     void stop();
-    static void newPadCB(GstElement* element, GstPad* pad, gpointer data);
+
     void setUri(const QString &uri);
 
 private:
     void setVideoDecoder(VideoEncoding encoding);
+    void _shutdownPipeline();
+    static void newPadCB(GstElement* element, GstPad* pad, gpointer data);
+    static void _onBusMessage(GstBus* bus, GstMessage* msg, gpointer data);
 
 signals:
-
+    void msgStateChangedReceived();
+    void msgErrorReceived();
+    void msgEOSReceived();
 public slots:
     void play();
 private slots:
     void _updateTimer();
     void _restart_timeout();
+    void _handleStateChanged();
+    void _handleEOS();
+    void _handleError();
 
 
 private:
@@ -55,6 +63,9 @@ private:
     bool _tryWithHardwareDecoding{true};
     bool _running{false};
     bool _starting{false};
+    bool _stop{false};
+    bool _stopping{false};
+    bool _streaming{false};
     QString _uri;
 
 };

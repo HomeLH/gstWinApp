@@ -37,13 +37,17 @@ gstplayer::gstplayer(QWidget *parent)
     // 设置解码形式
     setVideoDecoder(H264_SW);
     // 设置资源地址
-//    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
-    setUri("rtsp://127.0.0.1:8554/vlc");
+    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
+//    setUri("rtsp://127.0.0.1:8554/vlc");
 
-    // 设置重启定时器
+    // 设置重启定时器，定时器在handleERROR中重启；
     _restart_timer.setSingleShot(true);
 
     connect(&_restart_timer, &QTimer::timeout, this, &gstplayer::_restart_timeout);
+    connect(this, &gstplayer::msgErrorReceived, this, &gstplayer::_handleError);
+    connect(this, &gstplayer::msgEOSReceived, this, &gstplayer::_handleEOS);
+
+    connect(this, &gstplayer::msgStateChangedReceived, this, &gstplayer::_handleStateChanged);
 
     //TODO 增加判断条件，当前用一次定时器
     connect(&_frame_timer, &QTimer::timeout, this, &gstplayer::_updateTimer);
@@ -59,9 +63,9 @@ gstplayer::~gstplayer()
         gst_message_unref(msg)
     }
 #endif
-    gst_object_unref(bus);
-    gst_element_set_state(_pipeline, GST_STATE_NULL);
-    gst_object_unref(_pipeline);
+//    gst_object_unref(bus);
+//    gst_element_set_state(_pipeline, GST_STATE_NULL);
+//    gst_object_unref(_pipeline);
 }
 
 void gstplayer::start()
@@ -76,6 +80,7 @@ void gstplayer::start()
     }
     bool running{false};
     bool pipelineUp{false};
+    _stop = false;
     _starting = true;
     GstElement*     dataSource  = nullptr;
 //    GstCaps*        caps        = nullptr;
@@ -172,6 +177,15 @@ void gstplayer::start()
 
         dataSource = demux = parser = queue = decoder = queue1 = _playsink = nullptr;
         GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(_pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline-paused");
+        // 注册bus上的事件回调函数
+        GstBus* bus = nullptr;
+        // bus 上的消息处理，注册回到函数 _onBusMessage, 把this传入
+        if ((bus = gst_pipeline_get_bus(GST_PIPELINE(_pipeline))) != nullptr) {
+            gst_bus_enable_sync_message_emission(bus);
+            g_signal_connect(bus, "sync-message", G_CALLBACK(&gstplayer::_onBusMessage), this);
+            gst_object_unref(bus);
+            bus = nullptr;
+        }
         // 启动播放
 
         running = gst_element_set_state(_pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE;
@@ -231,6 +245,37 @@ void gstplayer::start()
 
 }
 
+void gstplayer::stop()
+{
+    _stop = true;
+    qDebug() <<"stop()";
+    // 判断有没有streaming
+    if(!_streaming){
+        // 清理pipeline
+        _shutdownPipeline();
+    } else if(_pipeline!=nullptr && !_stopping){
+        qDebug() << "Stopping _pipeline!";
+        gst_element_send_event(_pipeline, gst_event_new_eos());
+        _stopping = true;
+        GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(_pipeline));
+        // 阻塞等待接收eos信号
+        GstMessage* message = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE,
+                                (GstMessageType)(GST_MESSAGE_EOS|GST_MESSAGE_ERROR));
+        gst_object_unref(bus);
+        // error or eos
+        if(GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR) {
+            _shutdownPipeline();
+            qCritical() << "Error stopping pipeline!";
+        } else if(GST_MESSAGE_TYPE(message) == GST_MESSAGE_EOS) {
+            _handleEOS();
+        }
+        gst_message_unref(message);
+
+
+    }
+
+}
+
 void gstplayer::newPadCB(GstElement *element, GstPad *pad, gpointer data)
 {
     GstPad *sinkpad;
@@ -272,6 +317,59 @@ void gstplayer::setVideoDecoder(gstplayer::VideoEncoding encoding)
     if (!_tryWithHardwareDecoding) {
         _hwDecoderName.clear();
     }
+}
+
+void gstplayer::_shutdownPipeline()
+{
+    if(!_pipeline) {
+        qDebug() << "No pipeline";
+        return;
+    }
+    GstBus* bus = nullptr;
+    // gst_bus_disable_sync_message_emission
+    if ((bus = gst_pipeline_get_bus(GST_PIPELINE(_pipeline))) != nullptr) {
+        gst_bus_disable_sync_message_emission(bus);
+        gst_object_unref(bus);
+        bus = nullptr;
+    }
+    gst_element_set_state(_pipeline, GST_STATE_NULL);
+//    gst_bin_remove(GST_BIN(_pipeline), _videoSink);
+    gst_object_unref(_pipeline);
+    _pipeline = nullptr;
+    _streaming = false;
+//    _recording = false;
+    _stopping = false;
+    _running = false;
+    //    emit recordingChanged();
+}
+
+void gstplayer::_onBusMessage(GstBus *bus, GstMessage *msg, gpointer data)
+{
+    Q_UNUSED(bus)
+    Q_ASSERT(msg != nullptr && data != nullptr);
+    gstplayer* pThis = static_cast<gstplayer*>(data);
+
+    switch(GST_MESSAGE_TYPE(msg)) {
+    case(GST_MESSAGE_ERROR): {
+        gchar* debug;
+        GError* error;
+        gst_message_parse_error(msg, &error, &debug);
+        g_free(debug);
+        qDebug() << error->message;
+        g_error_free(error);
+        pThis->msgErrorReceived();
+    }
+        break;
+    case(GST_MESSAGE_EOS):
+        pThis->msgEOSReceived();
+        break;
+    case(GST_MESSAGE_STATE_CHANGED):
+        pThis->msgStateChangedReceived();
+        break;
+    default:
+        break;
+    }
+//    return TRUE;
 }
 
 void gstplayer::play()
@@ -318,12 +416,43 @@ void gstplayer::_updateTimer()
 
 void gstplayer::_restart_timeout()
 {
-//    qCDebug(VideoManagerLog) << "Restart video streaming";
+    // 触发条件 重启定时器超时；重启定时器在handleERROR函数中重置
+    qDebug() << "Restart video streaming";
 //    stopVideo();
+    stop();
+    start();
 //    // seturi
 //    _updateSettings();
 //    startVideo();
-//    emit aspectRatioChanged();
+    //    emit aspectRatioChanged();
+}
+
+void gstplayer::_handleStateChanged()
+{
+    if(_pipeline) {
+        _streaming = GST_STATE(_pipeline) == GST_STATE_PLAYING;
+        qDebug() << "State changed, _streaming:" << _streaming;
+    }
+}
+
+void gstplayer::_handleEOS()
+{
+    if(_stopping) {
+        _shutdownPipeline();
+        qDebug() << "Stopped";
+    }  else {
+        qDebug() << "VideoReceiver: Unexpected EOS!";
+        _handleError();
+    }
+}
+
+void gstplayer::_handleError()
+{
+    qDebug() << "Gstreamer error!";
+    // If there was an error we switch to software decoding only
+    _tryWithHardwareDecoding = false;
+    stop();
+    _restart_timer.start(_restart_time_ms);
 }
 
 void gstplayer::setUri(const QString &uri)
