@@ -53,6 +53,8 @@ private:
     QString _hwDecoderName;
     QString _swDecoderName;
     bool _tryWithHardwareDecoding{true};
+    bool _running{false};
+    bool _starting{false};
     QString _uri;
 
 };

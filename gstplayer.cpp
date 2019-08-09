@@ -70,15 +70,23 @@ void gstplayer::start()
         qDebug() << "URI is not specified!";
         return;
     }
+    if(_running){
+        qDebug() << "Already running!";
+        return;
+    }
+    bool running{false};
+    bool pipelineUp{false};
+    _starting = true;
     GstElement*     dataSource  = nullptr;
-    GstCaps*        caps        = nullptr;
+//    GstCaps*        caps        = nullptr;
     GstElement*     demux       = nullptr;
     GstElement*     parser      = nullptr;
     GstElement*     queue       = nullptr;
     GstElement*     decoder     = nullptr;
     GstElement*     queue1      = nullptr;
     GstElement* _playsink{nullptr};
-    bool running{false};
+
+
     do {
         // 创建pipeline
         if((_pipeline = gst_pipeline_new("rtspreceiver")) == nullptr){
@@ -147,8 +155,8 @@ void gstplayer::start()
         // 加入 pipeline
         gst_bin_add_many(GST_BIN(_pipeline), dataSource, demux, parser, _tee, queue
                          , decoder, _playsink, nullptr);
-
-
+        // pipeline 成功
+        pipelineUp = true;
         // link
 
 
@@ -170,6 +178,56 @@ void gstplayer::start()
         qDebug() << "Running flag: " << running;
     } while(0);
     // TODO 启动失败后清理资源
+    if(!running){
+        qDebug() << "start() failed!";
+        if(nullptr!=_pipeline){
+            gst_object_unref(_pipeline);
+            _pipeline = nullptr;
+        }
+
+        // If we failed before adding items to the pipeline, then clean up
+        if (!pipelineUp) {
+            if (decoder != nullptr) {
+                gst_object_unref(decoder);
+                decoder = nullptr;
+            }
+
+            if (parser != nullptr) {
+                gst_object_unref(parser);
+                parser = nullptr;
+            }
+
+            if (demux != nullptr) {
+                gst_object_unref(demux);
+                demux = nullptr;
+            }
+
+            if (dataSource != nullptr) {
+                gst_object_unref(dataSource);
+                dataSource = nullptr;
+            }
+
+            if (_tee != nullptr) {
+                gst_object_unref(_tee);
+                dataSource = nullptr;
+            }
+
+            if (queue != nullptr) {
+                gst_object_unref(queue);
+                dataSource = nullptr;
+            }
+            if(_playsink != nullptr){
+                gst_object_unref(_playsink);
+                _playsink = nullptr;
+            }
+        }
+        _running = false;
+    } else {
+        GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(_pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline-playing");
+        _running = true;
+        qDebug() << "Running";
+    }
+    _starting = false;
 
 }
 
