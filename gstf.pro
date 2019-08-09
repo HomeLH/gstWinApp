@@ -7,7 +7,7 @@
 QT       += core gui
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
-QT += core quick opengl gamepad xml svg qml multimedia multimediawidgets
+QT += core multimediawidgets
 
 
 TARGET = gstf
@@ -37,6 +37,12 @@ CONFIG += c++11
 #    CONFIG      += VideoEnabled
 #}
 
+CONFIG(debug, debug|release) {
+    DESTDIR  = $${OUT_PWD}/debug
+} else {
+    DESTDIR  = $${OUT_PWD}/release
+}
+
 GST_ROOT = D:\gstreamer\1.0\x86_64
 #DEFINES += QT_DEPRECATED_WARNINGS
 LIBS        += -L$$GST_ROOT/lib -lgstreamer-1.0 -lgstvideo-1.0 -lgstbase-1.0
@@ -54,8 +60,10 @@ GTK_ROOT = C:/msys32/mingw32
 INCLUDEPATH += \
     $$GTK_ROOT/include/gtk-3.0\
 
-DESTDIR_WIN = $$replace(DESTDIR, "/", "\\")
-GST_ROOT_WIN = $$replace(GST_ROOT, "/", "\\")
+
+message($$DESTDIR)
+DESTDIR_WIN =$$replace(DESTDIR, "/", "\\")
+GST_ROOT_WIN =$$replace(GST_ROOT, "/", "\\")
 
 ## Copy main GStreamer runtime files
 QMAKE_POST_LINK += $$escape_expand(\\n) xcopy \"$$GST_ROOT_WIN\\bin\*.dll\" \"$$DESTDIR_WIN\" /S/Y $$escape_expand(\\n)

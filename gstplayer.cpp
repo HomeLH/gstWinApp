@@ -1,9 +1,11 @@
 #include "gstplayer.h"
+#include <glib.h>
 #include <gst/gst.h>
 #include <QDebug>
 #include <QUrl>
 #include <gst/video/videooverlay.h>
 #include <QVBoxLayout>
+#include <QLabel>
 
 gstplayer::gstplayer(QWidget *parent)
     : QWidget(parent)
@@ -12,13 +14,30 @@ gstplayer::gstplayer(QWidget *parent)
 {
     // 创建videoWidget
     _playerWidget = new QVideoWidget(this);
-    _playerWidget->setBackgroundRole(QPalette::Dark);
+//    _playerWidget->setBackgroundRole(QPalette::Dark);
+//    _playerWidget->setGeometry(0, 0, 300, 100);
+//    _playerWidget->setStyleSheet("background-color:yellow;");
+
+    //设置背景黑色
+    QPalette pal(_playerWidget->palette());
+    pal.setColor(QPalette::Background, Qt::black);
+    _playerWidget->setAutoFillBackground(true);
+    _playerWidget->setPalette(pal);
+
+
     auto vlayout = new QVBoxLayout{this};
     vlayout->addWidget(_playerWidget);
+    this->setLayout(vlayout);
+
+//    _playerWidget->show();
+    auto label = new QLabel(_playerWidget);
+    label->setText("视频正在加载...");
+    label->setStyleSheet("color:white;");
 
     // 设置解码形式
     setVideoDecoder(H264_SW);
     // 设置资源地址
+//    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
     setUri("rtsp://127.0.0.1:8554/vlc");
 
     // 设置重启定时器
@@ -29,7 +48,7 @@ gstplayer::gstplayer(QWidget *parent)
     //TODO 增加判断条件，当前用一次定时器
     connect(&_frame_timer, &QTimer::timeout, this, &gstplayer::_updateTimer);
     _frame_timer.setSingleShot(true);
-    _frame_timer.start(10);
+    _frame_timer.start(1000);
 
 }
 
@@ -114,7 +133,10 @@ void gstplayer::start()
         }
 #endif
         // 创建sink
-        if((_playsink = gst_element_factory_make("playsink", nullptr)) == nullptr){
+        if((_playsink = gst_element_factory_make("glimagesink", nullptr)) == nullptr){
+//        if((_playsink = gst_element_factory_make("ximagesink", nullptr)) == nullptr){
+//            if((_playsink = gst_element_factory_make("autovideosink", nullptr)) == nullptr){
+//            if((_playsink = gst_element_factory_make("playsink", nullptr)) == nullptr){
             qDebug() << "start() failed. Error with gst_element_factory_make(\"playsink\")";
             break;
         }
@@ -126,14 +148,20 @@ void gstplayer::start()
         gst_bin_add_many(GST_BIN(_pipeline), dataSource, demux, parser, _tee, queue
                          , decoder, _playsink, nullptr);
 
-        gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(_playsink), hint);
+
         // link
 
-        g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
+
         if(!gst_element_link_many(demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
             qDebug() << "Unable to link RTSP elements.";
             break;
         }
+        assert(nullptr!=demux);
+        g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
+
+        WId xwinid = _playerWidget->winId();
+        gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(_playsink), xwinid);
+
         dataSource = demux = parser = queue = decoder = queue1 = _playsink = nullptr;
         GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(_pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline-paused");
         // 启动播放
@@ -147,17 +175,28 @@ void gstplayer::start()
 
 void gstplayer::newPadCB(GstElement *element, GstPad *pad, gpointer data)
 {
-    gchar* name = gst_pad_get_name(pad);
-    //g_print("A new pad %s was created\n", name);
-    GstCaps* p_caps = gst_pad_get_pad_template_caps (pad);
-    gchar* description = gst_caps_to_string(p_caps);
-    qDebug() << p_caps << ", " << description;
-    g_free(description);
-    GstElement* sink = GST_ELEMENT(data);
-//    if(GST_PAD_LINK_FAILED(gst_pad_link(pad, sink))
-    if(gst_element_link_pads(element, name, sink, "sink") == false)
-        qCritical() << "newPadCB : failed to link elements\n";
-    g_free(name);
+    GstPad *sinkpad;
+    GstElement *decoder = (GstElement*)data;
+    assert(nullptr!=data);
+    sinkpad = gst_element_get_static_pad(decoder, "sink");
+    assert(nullptr!=sinkpad);
+    if(nullptr == sinkpad){
+        qDebug() << "NUllptr!";
+    }
+    gst_pad_link(pad, sinkpad);
+    gst_object_unref(sinkpad);
+    qDebug() << "linked";
+//    gchar* name = gst_pad_get_name(pad);
+//    //g_print("A new pad %s was created\n", name);
+//    GstCaps* p_caps = gst_pad_get_pad_template_caps (pad);
+//    gchar* description = gst_caps_to_string(p_caps);
+//    qDebug() << p_caps << ", " << description;
+//    g_free(description);
+//    GstElement* sink = GST_ELEMENT(data);
+////    if(GST_PAD_LINK_FAILED(gst_pad_link(pad, sink))
+//    if(gst_element_link_pads(element, name, sink, "sink") == false)
+//        qCritical() << "newPadCB : failed to link elements\n";
+//    g_free(name);
 }
 
 void gstplayer::setVideoDecoder(gstplayer::VideoEncoding encoding)

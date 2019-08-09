@@ -12,12 +12,11 @@ MainWindow::MainWindow(QWidget *parent) :
     this->resize(800,600);
 
     auto widget = new QWidget;
-
     auto vlayout = new QVBoxLayout;
     widget->setLayout(vlayout);
 
-    auto player = new gstplayer();
-    auto button = new QPushButton();
+    auto player = new gstplayer(widget);
+    auto button = new QPushButton(widget);
     button->setText(tr("Play"));
 //    button->show();
 
