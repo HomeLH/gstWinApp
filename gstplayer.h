@@ -1,4 +1,4 @@
-#ifndef GSTPLAYER_H
+﻿#ifndef GSTPLAYER_H
 #define GSTPLAYER_H
 
 #include <QWidget>
@@ -55,6 +55,8 @@ private:
     int _restart_time_ms;
     //-- RTSP UDP reconnect timeout
     uint64_t _udpReconnect_us;
+    uint64_t _udpReconnect_ms;
+    uint64_t _udpReconnect_ns;
     // encode
     QString _depayName;
     QString _parserName;

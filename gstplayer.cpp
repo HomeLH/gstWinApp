@@ -11,6 +11,8 @@ gstplayer::gstplayer(QWidget *parent)
     : QWidget(parent)
     ,_restart_time_ms(1389)
     ,_udpReconnect_us(5000000)
+    ,_udpReconnect_ms(5000)
+    ,_udpReconnect_ns(5000000000)
 {
     // 创建videoWidget
     _playerWidget = new QVideoWidget(this);
@@ -39,8 +41,8 @@ gstplayer::gstplayer(QWidget *parent)
     setVideoDecoder(H264_SW);
     // 设置资源地址
 //    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
-//    setUri("rtsp://127.0.0.1:8554/vlc");
-    setUri("udp://0.0.0.0:5600");
+    setUri("rtsp://127.0.0.1:8554/vlc");
+//    setUri("udp://0.0.0.0:5600");
 
     // 设置重启定时器，定时器在handleERROR中重启；
     _restart_timer.setSingleShot(true);
@@ -51,7 +53,8 @@ gstplayer::gstplayer(QWidget *parent)
 
     connect(this, &gstplayer::msgStateChangedReceived, this, &gstplayer::_handleStateChanged);
 
-    //TODO 增加判断条件，当前用一次定时器
+    //TODO 增加判断条件，当前用一次定时器，
+    // TODO 心跳检测
     connect(&_frame_timer, &QTimer::timeout, this, &gstplayer::_updateTimer);
     _frame_timer.setSingleShot(true);
     _frame_timer.start(1000);
@@ -125,11 +128,11 @@ void gstplayer::start()
                 qCritical() << "VideoReceiver::start() failed. Error with gst_caps_from_string()";
                 break;
             }
-            g_object_set(static_cast<gpointer>(dataSource), "uri", qPrintable(_uri), "caps", caps, nullptr);
+            g_object_set(static_cast<gpointer>(dataSource), "uri", qPrintable(_uri), "caps", caps, "timeout", _udpReconnect_ns, nullptr);
         } else {
             // 设置rtsp 源
             g_object_set(static_cast<gpointer>(dataSource), "location", qPrintable(_uri),
-                         "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_us, NULL);
+                         "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_ms, NULL);
 
         }
 
@@ -388,8 +391,10 @@ void gstplayer::_onBusMessage(GstBus *bus, GstMessage *msg, gpointer data)
     Q_UNUSED(bus)
     Q_ASSERT(msg != nullptr && data != nullptr);
     gstplayer* pThis = static_cast<gstplayer*>(data);
-
+    qDebug() <<"Bus message type: " << GST_MESSAGE_TYPE_NAME(msg);
     switch(GST_MESSAGE_TYPE(msg)) {
+    // rstp timeout 超时后会产生error信息
+    // 并打印Could not open resource for reading and writing.
     case(GST_MESSAGE_ERROR): {
         gchar* debug;
         GError* error;
@@ -405,6 +410,16 @@ void gstplayer::_onBusMessage(GstBus *bus, GstMessage *msg, gpointer data)
         break;
     case(GST_MESSAGE_STATE_CHANGED):
         pThis->msgStateChangedReceived();
+        break;
+    case(GST_MESSAGE_ELEMENT):
+        const GstStructure *structure;
+        structure = gst_message_get_structure(msg);
+//        qDebug()<<(char*)gst_structure_to_string (structure);
+//        qDebug()<<(char*)gst_structure_get_name(structure);
+        if(!strcmp(gst_structure_get_name(structure), "GstUDPSrcTimeout")){
+            qDebug() <<"UDP Timeout";
+            pThis->msgErrorReceived();
+        }
         break;
     default:
         break;
@@ -449,6 +464,17 @@ void gstplayer::play()
 
 void gstplayer::_updateTimer()
 {
+    // 该handler 函数， 每个定时器周期触发一次
+
+    // 如果正在启动或者正在停止则退出
+//    if(_starting || _stopping){
+//        return;
+//    }
+//    // 如果正在流播放
+//    if(_streaming){
+
+//    }
+
     // TODO 增加判断条件 超时判断
     // 开启播放
     start();
