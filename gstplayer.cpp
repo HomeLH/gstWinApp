@@ -1,4 +1,4 @@
-#include "gstplayer.h"
+﻿#include "gstplayer.h"
 #include <glib.h>
 #include <gst/gst.h>
 #include <QDebug>
@@ -31,7 +31,8 @@ gstplayer::gstplayer(QWidget *parent)
 
 //    _playerWidget->show();
     auto label = new QLabel(_playerWidget);
-    label->setText("视频正在加载...");
+    label->setText(QStringLiteral("视频正在加载..."));
+//    label->setText(u8"视频正在加载...");
     label->setStyleSheet("color:white;");
 
     // 设置解码形式
@@ -81,6 +82,8 @@ void gstplayer::start()
     }
     bool running{false};
     bool pipelineUp{false};
+    // 判断是否为udp 264流，具体区别体现在gstreamer的 src 以及link上
+    bool isUdp264=_uri.contains("udp://");
     _stop = false;
     _starting = true;
     GstElement*     dataSource  = nullptr;
@@ -96,28 +99,40 @@ void gstplayer::start()
 
     do {
         // 创建pipeline
-        if((_pipeline = gst_pipeline_new("rtspreceiver")) == nullptr){
+        if((_pipeline = gst_pipeline_new("streamreceiver")) == nullptr){
             qDebug() << "start() failed. Error with gst_pipeline_new()";
             break;
         }
-        // 创建rtspsrc element
-//        if((dataSource = gst_element_factory_make("rtspsrc", "rtsp-source")) == nullptr){
-//            qDebug() << "Error with data source for gst_element_factory_make()";
-//            break;
-//        }
-        // 创建udp element
-        if((dataSource = gst_element_factory_make("udpsrc", "udp-source")) == nullptr){
-            qDebug() <<"Error with data source for udp-source";
-            break;
+        if(isUdp264){
+            // 创建udp element
+            if((dataSource = gst_element_factory_make("udpsrc", "udp-source")) == nullptr){
+                qDebug() <<"Error with data source for udp-source";
+                break;
+            }
+        } else {
+//             创建rtspsrc element
+            if((dataSource = gst_element_factory_make("rtspsrc", "rtsp-source")) == nullptr){
+                qDebug() << "Error with data source for gst_element_factory_make()";
+                break;
+            }
         }
-        if ((caps = gst_caps_from_string("application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264")) == nullptr) {
-                        qCritical() << "VideoReceiver::start() failed. Error with gst_caps_from_string()";
-                        break;
-                    }
-        g_object_set(static_cast<gpointer>(dataSource), "uri", qPrintable(_uri), "caps", caps, nullptr);
-        // 设置rtsp 源
-//        g_object_set(static_cast<gpointer>(dataSource), "location", qPrintable(_uri),
-//                     "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_us, NULL);
+
+
+
+        if (isUdp264){
+            // 设置h264 dataSource
+            if ((caps = gst_caps_from_string("application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264")) == nullptr) {
+                qCritical() << "VideoReceiver::start() failed. Error with gst_caps_from_string()";
+                break;
+            }
+            g_object_set(static_cast<gpointer>(dataSource), "uri", qPrintable(_uri), "caps", caps, nullptr);
+        } else {
+            // 设置rtsp 源
+            g_object_set(static_cast<gpointer>(dataSource), "location", qPrintable(_uri),
+                         "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_us, NULL);
+
+        }
+
         // 设置 demux
         if ((demux = gst_element_factory_make(_depayName.toLatin1().data(), "rtp-depacketizer")) == nullptr) {
            qDebug() << "start() failed. Error with gst_element_factory_make('" << _depayName << "')";
@@ -175,16 +190,25 @@ void gstplayer::start()
         // link
 
 
-//        if(!gst_element_link_many(demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
-//            qDebug() << "Unable to link RTSP elements.";
-//            break;
-//        }
-        if(!gst_element_link_many(dataSource, demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
-            qCritical() << "Unable to link UDP elements.";
-            break;
+
+        if(isUdp264){
+            // udp 264 link
+            if(!gst_element_link_many(dataSource, demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
+                qCritical() << "Unable to link UDP elements.";
+                break;
+            }
+        } else {
+            // rtsp link
+            if(!gst_element_link_many(demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
+                qDebug() << "Unable to link RTSP elements.";
+                break;
+            }
+            assert(nullptr!=demux);
+            // rtsp 动态pad，source pad availability 为 sometimes；
+            g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
         }
-        assert(nullptr!=demux);
-//        g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
+
+
         // 将sink绑定到QVideoWidget上去；
         WId xwinid = _playerWidget->winId();
         gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(_playsink), xwinid);
@@ -292,8 +316,10 @@ void gstplayer::stop()
 
 void gstplayer::newPadCB(GstElement *element, GstPad *pad, gpointer data)
 {
+    // 未使用参数声明
+    Q_UNUSED(element);
     GstPad *sinkpad;
-    GstElement *decoder = (GstElement*)data;
+    GstElement *decoder = static_cast<GstElement*>(data);
     assert(nullptr!=data);
     sinkpad = gst_element_get_static_pad(decoder, "sink");
     assert(nullptr!=sinkpad);
@@ -388,6 +414,7 @@ void gstplayer::_onBusMessage(GstBus *bus, GstMessage *msg, gpointer data)
 
 void gstplayer::play()
 {
+#ifdef PLAYTEST
     _lpipeline = gst_element_factory_make ("playbin", "playbin");
     GstElement *_sink = gst_element_factory_make("qtquick2videosink",nullptr);
     if(nullptr == _sink){
@@ -417,7 +444,7 @@ void gstplayer::play()
     GstMessage *msg{};
     // block
 //    msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE,(GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
-
+#endif
 }
 
 void gstplayer::_updateTimer()
