@@ -37,8 +37,9 @@ gstplayer::gstplayer(QWidget *parent)
     // 设置解码形式
     setVideoDecoder(H264_SW);
     // 设置资源地址
-    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
+//    setUri("rtsp://184.72.239.149/vod/mp4://BigBuckBunny_175k.mov");
 //    setUri("rtsp://127.0.0.1:8554/vlc");
+    setUri("udp://0.0.0.0:5600");
 
     // 设置重启定时器，定时器在handleERROR中重启；
     _restart_timer.setSingleShot(true);
@@ -89,6 +90,7 @@ void gstplayer::start()
     GstElement*     queue       = nullptr;
     GstElement*     decoder     = nullptr;
     GstElement*     queue1      = nullptr;
+    GstCaps*        caps        = nullptr;
     GstElement* _playsink{nullptr};
 
 
@@ -99,19 +101,29 @@ void gstplayer::start()
             break;
         }
         // 创建rtspsrc element
-        if((dataSource = gst_element_factory_make("rtspsrc", "rtsp-source")) == nullptr){
-            qDebug() << "Error with data source for gst_element_factory_make()";
+//        if((dataSource = gst_element_factory_make("rtspsrc", "rtsp-source")) == nullptr){
+//            qDebug() << "Error with data source for gst_element_factory_make()";
+//            break;
+//        }
+        // 创建udp element
+        if((dataSource = gst_element_factory_make("udpsrc", "udp-source")) == nullptr){
+            qDebug() <<"Error with data source for udp-source";
             break;
         }
+        if ((caps = gst_caps_from_string("application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264")) == nullptr) {
+                        qCritical() << "VideoReceiver::start() failed. Error with gst_caps_from_string()";
+                        break;
+                    }
+        g_object_set(static_cast<gpointer>(dataSource), "uri", qPrintable(_uri), "caps", caps, nullptr);
         // 设置rtsp 源
-        g_object_set(static_cast<gpointer>(dataSource), "location", qPrintable(_uri),
-                     "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_us, NULL);
+//        g_object_set(static_cast<gpointer>(dataSource), "location", qPrintable(_uri),
+//                     "latency", 17, "udp-reconnect", 1, "timeout", _udpReconnect_us, NULL);
         // 设置 demux
         if ((demux = gst_element_factory_make(_depayName.toLatin1().data(), "rtp-depacketizer")) == nullptr) {
            qDebug() << "start() failed. Error with gst_element_factory_make('" << _depayName << "')";
             break;
         }
-        qDebug() << _depayName;
+//        qDebug() << _depayName;
         // 设置parser
         if ((parser = gst_element_factory_make(_parserName.toLatin1().data(), "parser")) == nullptr) {
             qDebug() << "start() failed. Error with gst_element_factory_make('" << _parserName << "')";
@@ -131,8 +143,8 @@ void gstplayer::start()
         }
         // 设置解码器，没有硬解码的情况下用软解码
         if (!_hwDecoderName.isNull() || (decoder = gst_element_factory_make(_hwDecoderName.toLatin1().data(), "decoder")) == nullptr) {
-            qWarning() << "VideoReceiver::start() hardware decoding not available "
-                       << (_hwDecoderName.isEmpty() ? _hwDecoderName : "");
+//            qWarning() << "VideoReceiver::start() hardware decoding not available "
+//                       << (_hwDecoderName.isEmpty() ? _hwDecoderName : "");
             if ((decoder = gst_element_factory_make(_swDecoderName.toLatin1().data(), "decoder")) == nullptr) {
                 qCritical() << "start() failed. Error with gst_element_factory_make('" << _swDecoderName << "')";
                 break;
@@ -153,9 +165,7 @@ void gstplayer::start()
             qDebug() << "start() failed. Error with gst_element_factory_make(\"playsink\")";
             break;
         }
-        // 将sink绑定到QVideoWidget上去；
-        guintptr hint = _playerWidget->winId();
-        qDebug()<<hint<<endl;
+
 
         // 加入 pipeline
         gst_bin_add_many(GST_BIN(_pipeline), dataSource, demux, parser, _tee, queue
@@ -165,13 +175,17 @@ void gstplayer::start()
         // link
 
 
-        if(!gst_element_link_many(demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
-            qDebug() << "Unable to link RTSP elements.";
+//        if(!gst_element_link_many(demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
+//            qDebug() << "Unable to link RTSP elements.";
+//            break;
+//        }
+        if(!gst_element_link_many(dataSource, demux, parser, _tee, queue, decoder, _playsink, nullptr)) {
+            qCritical() << "Unable to link UDP elements.";
             break;
         }
         assert(nullptr!=demux);
-        g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
-
+//        g_signal_connect(dataSource, "pad-added", G_CALLBACK(&gstplayer::newPadCB), demux);
+        // 将sink绑定到QVideoWidget上去；
         WId xwinid = _playerWidget->winId();
         gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(_playsink), xwinid);
 
@@ -189,7 +203,7 @@ void gstplayer::start()
         // 启动播放
 
         running = gst_element_set_state(_pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE;
-        qDebug() << "Running flag: " << running;
+//        qDebug() << "Running flag: " << running;
     } while(0);
     // TODO 启动失败后清理资源
     if(!running){
@@ -431,7 +445,7 @@ void gstplayer::_handleStateChanged()
 {
     if(_pipeline) {
         _streaming = GST_STATE(_pipeline) == GST_STATE_PLAYING;
-        qDebug() << "State changed, _streaming:" << _streaming;
+//        qDebug() << "State changed, _streaming:" << _streaming;
     }
 }
 
@@ -457,5 +471,6 @@ void gstplayer::_handleError()
 
 void gstplayer::setUri(const QString &uri)
 {
+    qDebug() << "update uri: " << uri;
     _uri = uri;
 }

@@ -162,14 +162,17 @@ VideoEnabled {
 SOURCES += \
         gstplayer.cpp \
         main.cpp \
-        mainwindow.cpp
+        mainwindow.cpp \
+        settingdialog.cpp
 
 HEADERS += \
         gstplayer.h \
-        mainwindow.h
+        mainwindow.h \
+        settingdialog.h
 
 FORMS += \
-        mainwindow.ui
+        mainwindow.ui \
+        settingdialog.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

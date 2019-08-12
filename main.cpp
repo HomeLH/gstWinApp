@@ -10,7 +10,9 @@ static void gstputenv(const QString& key, const QString& root, const QString& pa
 
 int main(int argc, char *argv[])
 {
-
+#if (QT_VERSION >= QT_VERSION_CHECK(5,9,0))
+    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+#endif
     QApplication a(argc, argv);
     QString currentDir = QCoreApplication::applicationDirPath();
     gstputenv("GST_PLUGIN_PATH", currentDir, "/gstreamer-plugins");  // register gstreamer-plugins
